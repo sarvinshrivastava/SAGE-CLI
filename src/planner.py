@@ -30,9 +30,29 @@ class PlannerTurn:
 class PlannerSuggestion:
     """Structured planner response indicating the chosen interaction mode."""
 
-    mode: Literal["command", "chat"]
+    mode: Literal["command", "chat", "plan"]
     command: Optional[str] = None
     message: Optional[str] = None
+    plan: Optional["PlannerPlan"] = None
+
+
+@dataclass
+class PlanStep:
+    """Represents a single sub-goal within a planner-generated plan."""
+
+    id: str
+    title: Optional[str]
+    command: Optional[str]
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
+@dataclass
+class PlannerPlan:
+    """Encapsulates a multi-step planner strategy for complex goals."""
+
+    summary: Optional[str]
+    steps: List[PlanStep]
 
 
 def parse_planner_reply(content: str) -> PlannerSuggestion:
@@ -109,7 +129,66 @@ def _build_suggestion_from_dict(data: dict) -> Optional[PlannerSuggestion]:
             return PlannerSuggestion(mode="chat", message=message_value.strip())
         return None
 
+    if mode == "plan" and "plan" in data:
+        plan_obj = _build_plan_from_mapping(data.get("plan"))
+        if plan_obj is not None:
+            return PlannerSuggestion(mode="plan", plan=plan_obj)
+        return None
+
     return None
+
+
+def _build_plan_from_mapping(raw_plan: object) -> Optional[PlannerPlan]:
+    if not isinstance(raw_plan, dict):
+        return None
+
+    summary_val = raw_plan.get("summary")
+    summary = str(summary_val).strip() if isinstance(summary_val, str) and summary_val.strip() else None
+
+    steps_val = raw_plan.get("steps")
+    if not isinstance(steps_val, list):
+        return None
+
+    steps: List[PlanStep] = []
+    for index, raw_step in enumerate(steps_val, start=1):
+        if not isinstance(raw_step, dict):
+            continue
+        step_id_val = raw_step.get("id")
+        if isinstance(step_id_val, str) and step_id_val.strip():
+            step_id = step_id_val.strip()
+        else:
+            step_id = str(index)
+
+        title_val = raw_step.get("title") or raw_step.get("name")
+        title = str(title_val).strip() if isinstance(title_val, str) and title_val.strip() else None
+
+        command_val = raw_step.get("command")
+        command = str(command_val).strip() if isinstance(command_val, str) and command_val.strip() else None
+
+        description_val = raw_step.get("description") or raw_step.get("detail")
+        description = (
+            str(description_val).strip()
+            if isinstance(description_val, str) and description_val.strip()
+            else None
+        )
+
+        status_val = raw_step.get("status")
+        status = str(status_val).strip() if isinstance(status_val, str) and status_val.strip() else None
+
+        steps.append(
+            PlanStep(
+                id=step_id,
+                title=title,
+                command=command,
+                description=description,
+                status=status,
+            )
+        )
+
+    if not steps:
+        return None
+
+    return PlannerPlan(summary=summary, steps=steps)
 
 
 def _repair_simple_command_json(fragment: str) -> Optional[str]:
@@ -197,6 +276,7 @@ class OpenRouterPlanner(CommandPlanner):
         referer: Optional[str] = None,
         title: Optional[str] = None,
         base_url: Optional[str] = None,
+        version: Optional[str] = None,
     ) -> None:
         self.model = model or os.getenv(
             "OPENROUTER_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b:free"
@@ -212,6 +292,7 @@ class OpenRouterPlanner(CommandPlanner):
         )
         self.referer = referer or os.getenv("OPENROUTER_SITE_URL")
         self.title = title or os.getenv("OPENROUTER_SITE_NAME")
+        self.version = version or os.getenv("OPENROUTER_PLANNER_VERSION")
 
     def suggest(self, goal: str, history: Optional[Iterable[PlannerTurn]] = None) -> str:
         history_list: List[PlannerTurn] = list(history) if history else []
@@ -305,33 +386,42 @@ class OpenRouterPlanner(CommandPlanner):
             
             "OUTPUT FORMAT:\n"
             "Always respond ONLY in **valid JSON** (no markdown, no comments, no text outside JSON). "
-            "You must use exactly one of these two schemas:\n"
+            "You must use exactly one of these schemas:\n"
             "1️⃣  {\"mode\": \"command\", \"command\": \"<next_shell_command>\"}\n"
-            "2️⃣  {\"mode\": \"chat\", \"message\": \"<clarification_or_information>\"}\n\n"
+            "2️⃣  {\"mode\": \"chat\", \"message\": \"<clarification_or_information>\"}\n"
+            "3️⃣  {\"mode\": \"plan\", \"plan\": {\"summary\": \"<strategy_overview>\", \"steps\": ["
+            "{\"id\": \"1\", \"title\": \"<step_title>\", \"command\": \"<suggested_command>\", \"description\": \"<optional_details>\"}]}}\n\n"
             
             "RULES:\n"
             "1. Clarify unclear goals or missing details using chat mode.\n"
-            "2. When giving commands:\n"
+            "2. Use plan mode when the goal requires multiple coordinated steps. Provide 3-7 ordered steps with unique string IDs, concise titles, and optional commands/descriptions. Default step status is 'pending'.\n"
+            "3. When giving commands:\n"
             "   - Prefer stable, idempotent, and widely supported tools.\n"
             "   - Use `apt-get` instead of `apt`, `systemctl` instead of service scripts.\n"
             "   - Avoid `sudo` or privileged operations unless absolutely necessary or explicitly allowed by the user.\n"
-            "3. After each command execution, you will receive `exit_code` and `output`:\n"
+            "4. After each command execution, you will receive `exit_code` and `output`:\n"
             "   - If successful: plan the next logical step.\n"
             "   - If failed: propose a diagnostic or remediation command.\n"
             "   - Never repeat a failed command verbatim.\n"
-            "4. Keep responses concise — one command per JSON.\n"
-            "5. When the user’s high-level goal is fully completed, respond exactly with:\n"
+            "5. Reference the plan steps when applicable (e.g., include the planned command or mention the step ID in your reasoning).\n"
+            "6. Keep responses concise — one command per JSON.\n"
+            "7. When the user’s high-level goal is fully completed, respond exactly with:\n"
             "   {\"mode\": \"command\", \"command\": \"DONE\"}\n"
-            "6. Never include explanations, reasoning, or comments outside JSON. "
+            "8. Never include explanations, reasoning, or comments outside JSON. "
             "This includes markdown formatting, backticks, or natural language text.\n"
-            "7. Maintain persistent awareness of prior steps, outputs, and user intent throughout the session.\n"
-            "8. Assume commands will be executed in a real shell; always prioritize safety and reversibility.\n\n"
+            "9. Maintain persistent awareness of prior steps, plan progress, outputs, and user intent throughout the session.\n"
+            "10. Assume commands will be executed in a real shell; always prioritize safety and reversibility.\n\n"
             
             "EXAMPLES:\n"
             "Goal: Install nginx and start the service\n"
             "→ {\"mode\": \"command\", \"command\": \"sudo apt-get update -y && sudo apt-get install -y nginx\"}\n"
             "→ {\"mode\": \"command\", \"command\": \"sudo systemctl start nginx && sudo systemctl enable nginx\"}\n"
             "→ {\"mode\": \"command\", \"command\": \"DONE\"}\n\n"
+            "Goal: Provision a new web server stack\n"
+            "→ {\"mode\": \"plan\", \"plan\": {\"summary\": \"Deploy nginx with app code and SSL\", \"steps\": ["
+            "{\"id\": \"1\", \"title\": \"Update packages\", \"command\": \"sudo apt-get update -y\"},"
+            "{\"id\": \"2\", \"title\": \"Install nginx\", \"command\": \"sudo apt-get install -y nginx\"},"
+            "{\"id\": \"3\", \"title\": \"Deploy app\", \"description\": \"Sync app files and restart service\"}]}}\n\n"
             
             "Your task is to plan and execute toward the goal step-by-step until completion. "
             "Be precise, structured, and consistent — your responses drive a live terminal automation system."

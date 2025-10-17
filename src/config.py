@@ -18,6 +18,7 @@ class PlannerConfig:
     referer: Optional[str]
     title: Optional[str]
     base_url: Optional[str]
+    version: Optional[str]
 
     def to_kwargs(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
@@ -33,6 +34,8 @@ class PlannerConfig:
             payload["title"] = self.title
         if self.base_url:
             payload["base_url"] = self.base_url
+        if self.version:
+            payload["version"] = self.version
         return payload
 
 
@@ -41,6 +44,7 @@ class AppConfig:
     planner: PlannerConfig
     session_dir: Optional[str]
     session_persist: bool
+    safety_policy_path: Optional[str]
 
     @classmethod
     def load(cls, path: Optional[str] = None) -> "AppConfig":
@@ -62,13 +66,22 @@ class AppConfig:
             referer=planner_data.get("referer"),
             title=planner_data.get("title"),
             base_url=planner_data.get("base_url"),
+            version=planner_data.get("version"),
         )
 
         session_opts = data.get("session", {})
         persist = session_opts.get("persist", True)
         session_dir = session_opts.get("directory")
 
-        return cls(planner=planner, session_dir=session_dir, session_persist=persist)
+        safety_opts = data.get("safety", {})
+        policy_path = safety_opts.get("policy")
+
+        return cls(
+            planner=planner,
+            session_dir=session_dir,
+            session_persist=persist,
+            safety_policy_path=policy_path,
+        )
 
     @classmethod
     def default(cls) -> "AppConfig":
@@ -81,7 +94,9 @@ class AppConfig:
                 referer=None,
                 title=None,
                 base_url=None,
+                version=None,
             ),
             session_dir=None,
             session_persist=True,
+            safety_policy_path=None,
         )
