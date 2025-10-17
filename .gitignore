@@ -1,0 +1,42 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Bytecode caches
+.mypy_cache/
+.pytest_cache/
+.pyre/
+ruff_cache/
+.coverage*
+htmlcov/
+.cache/
+
+# Packaging
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and editor settings
+.vscode/
+.idea/
+
+# Runtime outputs
+logs/
+sessions/
+*.log
+
+# Local configuration
+.env
+.env.*
+
+# sessions
+.sessions/
