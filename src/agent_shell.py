@@ -376,7 +376,7 @@ def main() -> None:
 
     while True:
         try:
-            goal = session.prompt("Goal> ").strip()
+            goal = session.prompt("User> ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\nGoodbye.")
             logger.info("User exited shell")
