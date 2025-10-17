@@ -5,7 +5,7 @@ An interactive command-line REPL that collaborates with a large language model t
 ## Features
 
 - **Goal-driven loop**: send a high-level task, review/edit suggested commands, confirm execution, and let the planner iterate until the job completes.
-- **Planner integration**: works with local Ollama models by default, with adapters for mock/testing backends and support for custom models/providers via CLI, environment, or JSON config.
+- **Planner integration**: talks to OpenRouter-hosted models by default, with a lightweight mock backend for testing and CLI/env/config overrides.
 - **Editable confirmation UI**: proposed commands appear in an editable prompt (powered by `prompt_toolkit`) before running.
 - **Streaming execution**: live stdout/stderr with buffered history (rendered using `rich`).
 - **Multi-step reasoning**: planner receives full command/output context and stops only after emitting `DONE`.
@@ -22,20 +22,21 @@ pip install -r requirements.txt
 python3 src/agent_shell.py --planner-timeout 90
 ```
 
-Required services:
+Required setup:
 
-- **Ollama** running locally (default `http://localhost:11434`).
-- `.env` (optional) for values like `OLLAMA_MODEL=deepseek-r1:8b`, `OLLAMA_TIMEOUT=120`.
+- OpenRouter API access with `OPENROUTER_API_KEY` stored in `.env`.
+- (Optional) `.env` entries for `OPENROUTER_MODEL`, `OPENROUTER_TIMEOUT`, `OPENROUTER_SITE_URL`, or `OPENROUTER_SITE_NAME` to fine-tune requests.
 
-Run with `--config ./config.json` to load defaults (planner model/timeout/providers, session directory, persistence preference). CLI flags always override config/environment.
+Run with `--config ./config.json` to load defaults (planner model/timeout, API key headers, session directory, persistence preference). CLI flags always override config/environment.
 
 ## Key CLI Options
 
-- `--planner MODEL` / `--planner-provider provider` / `--planner-timeout SEC`
+- `--planner MODEL` / `--planner-timeout SEC`
 - `--session-dir DIR` / `--session-id ID` / `--no-persist` / `--persist`
 - `--config PATH` (JSON config file)
 - `--allow-root` (skip root block) / `--safety-off` (disable risk prompts)
 - `--log-file PATH` (write structured logs)
+- `--planner-api-key KEY` / `--planner-referer URL` / `--planner-title NAME` / `--planner-base-url URL`
 
 Type `:new` to rotate sessions or `:session` to inspect the current log target.
 
@@ -46,10 +47,13 @@ Example `config.json`:
 ```json
 {
   "planner": {
-    "backend": "ollama",
-    "model": "deepseek-r1:8b",
+    "backend": "openrouter",
+    "model": "deepseek/deepseek-r1-0528-qwen3-8b:free",
     "timeout": 120,
-    "providers": ["cpu"]
+    "api_key": "${OPENROUTER_API_KEY}",
+    "referer": "https://your-site.example",
+    "title": "SAGE CLI",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions"
   },
   "session": {
     "directory": "~/agent-sessions",
@@ -63,7 +67,7 @@ Example `config.json`:
 ```
 src/
   agent_shell.py   # main REPL orchestrator
-  planner.py       # LLM command planner abstraction (Ollama + mock)
+  planner.py       # LLM command planner abstraction (OpenRouter + mock)
   session.py       # session persistence helpers
   config.py        # config loader and planner settings
 ```

@@ -23,7 +23,7 @@ from prompt_toolkit import PromptSession
 from rich.console import Console
 
 from config import AppConfig
-from planner import CommandPlanner, PlannerError, PlannerTurn, create_planner
+from planner import CommandPlanner, PlannerError, PlannerTurn, PlannerSuggestion, create_planner
 from session import SessionManager
 
 @dataclass
@@ -279,7 +279,11 @@ def load_environment() -> None:
 def main() -> None:
     load_environment()
     parser = argparse.ArgumentParser(description="Phase 4 AI shell assistant")
-    parser.add_argument("--planner", dest="planner_name", help="Planner backend to use (ollama, mock)")
+    parser.add_argument(
+        "--planner",
+        dest="planner_name",
+        help="Planner backend to use (openrouter, mock)",
+    )
     parser.add_argument(
         "--planner-timeout",
         dest="planner_timeout",
@@ -287,11 +291,13 @@ def main() -> None:
         help="Override planner request timeout in seconds",
     )
     parser.add_argument("--planner-model", dest="planner_model", help="Override planner model identifier")
+    parser.add_argument("--planner-api-key", dest="planner_api_key", help="Override planner API key")
+    parser.add_argument("--planner-referer", dest="planner_referer", help="HTTP referer for OpenRouter requests")
+    parser.add_argument("--planner-title", dest="planner_title", help="X-Title header for OpenRouter requests")
     parser.add_argument(
-        "--planner-provider",
-        dest="planner_providers",
-        action="append",
-        help="Specify one or more planner providers (can repeat)",
+        "--planner-base-url",
+        dest="planner_base_url",
+        help="Override planner base URL (useful for OpenRouter proxies)",
     )
     parser.add_argument("--config", dest="config_path", help="Path to JSON configuration file")
     parser.add_argument("--session-id", help="Override the session identifier used for persistence")
@@ -348,8 +354,14 @@ def main() -> None:
         planner_kwargs["timeout"] = args.planner_timeout
     if args.planner_model is not None:
         planner_kwargs["model"] = args.planner_model
-    if args.planner_providers:
-        planner_kwargs["providers"] = args.planner_providers
+    if args.planner_api_key is not None:
+        planner_kwargs["api_key"] = args.planner_api_key
+    if args.planner_referer is not None:
+        planner_kwargs["referer"] = args.planner_referer
+    if args.planner_title is not None:
+        planner_kwargs["title"] = args.planner_title
+    if args.planner_base_url is not None:
+        planner_kwargs["base_url"] = args.planner_base_url
 
     try:
         planner: CommandPlanner = create_planner(planner_name, **planner_kwargs)
@@ -398,18 +410,35 @@ def main() -> None:
         planner_error_msg: Optional[str] = None
         user_cancelled = False
         planner_completed = False
+        conversation_messages: List[str] = []
 
         while True:
             try:
                 planner_history = build_planner_history(goal_history)
-                command_suggestion = planner.suggest(goal, planner_history)
+                planner_reply = planner.suggest(goal, planner_history)
             except PlannerError as exc:
                 console.print(f"[red]Planner error:[/red] {exc}")
                 planner_error_msg = str(exc)
                 logger.error("Planner error during goal '%s': %s", goal, exc)
                 break
 
-            normalized = command_suggestion.strip().upper()
+            if planner_reply.mode == "chat":
+                message = planner_reply.message or ""
+                console.print()
+                console.print(f"[green]Assistant:[/green] {message}")
+                logger.info("Planner chat response: %s", message)
+                conversation_messages.append(message)
+                planner_completed = True
+                break
+
+            command_suggestion = (planner_reply.command or "").strip()
+            if not command_suggestion:
+                console.print("[red]Planner returned an empty command.")
+                planner_error_msg = "empty command"
+                logger.error("Planner returned empty command for goal '%s'", goal)
+                break
+
+            normalized = command_suggestion.upper()
             if normalized == "DONE":
                 last_return_code = goal_history[-1].returncode if goal_history else 0
                 if last_return_code == 0:
@@ -460,7 +489,7 @@ def main() -> None:
 
             continue
 
-        if goal_history or planner_error_msg or user_cancelled:
+        if goal_history or planner_error_msg or user_cancelled or conversation_messages:
             status = determine_status(goal_history, planner_completed, planner_error_msg, user_cancelled)
             metadata: Dict[str, object] = {
                 "planner_completed": planner_completed,
@@ -472,6 +501,8 @@ def main() -> None:
                 metadata["failure_counts"] = failure_counts
             if goal_history:
                 metadata["risk_levels"] = [res.risk_level for res in goal_history]
+            if conversation_messages:
+                metadata["conversation"] = conversation_messages
             if safety_disabled:
                 metadata["safety_disabled"] = True
 
