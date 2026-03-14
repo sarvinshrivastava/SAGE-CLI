@@ -86,11 +86,11 @@ export function CommandReview({
       if (mode !== "review") return;
       const k = input.toLowerCase();
       if (k === "a" || key.return) {
-        // Accept — check if high-risk needs confirmation
+        // Accept — require explicit confirmation when safety is on and either
+        // the level is high OR the policy explicitly set requireConfirmation.
         if (
           !safetyDisabled &&
-          safetyDecision.requireConfirmation &&
-          level === "high"
+          (level === "high" || safetyDecision.requireConfirmation)
         ) {
           setConfirmValue("");
           setMode("confirm");

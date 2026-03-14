@@ -110,10 +110,13 @@ Options:
 // ---------------------------------------------------------------------------
 
 function ensureNotRoot(allowRoot: boolean) {
+  // Prefer geteuid (effective UID) to catch setuid/sudo scenarios, fall back to getuid.
+  const geteuid = (process as any).geteuid as (() => number) | undefined;
   const getuid = (process as any).getuid as (() => number) | undefined;
-  if (typeof getuid === "function") {
+  const getEffectiveUid = geteuid ?? getuid;
+  if (typeof getEffectiveUid === "function") {
     try {
-      if (getuid() === 0 && !allowRoot) {
+      if (getEffectiveUid() === 0 && !allowRoot) {
         console.error(
           "Refusing to run as root. Use --allow-root or AGENT_ALLOW_ROOT=1 if you understand the risk."
         );

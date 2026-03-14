@@ -70,7 +70,7 @@ export class TelemetryEmitterImpl implements TelemetryEmitter {
     }
     
     const record = { ...payload };
-    record.timestamp = new Date().toISOString();
+    if (record.timestamp == null) record.timestamp = new Date().toISOString();
     
     try {
       fs.appendFileSync(this.path, JSON.stringify(record) + "\n", "utf-8");
