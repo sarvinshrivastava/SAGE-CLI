@@ -2,7 +2,7 @@
  * React hook that spawns a child process and streams its output.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { spawn } from "child_process";
 
 export interface CommandExecState {
@@ -13,6 +13,11 @@ export interface CommandExecState {
 }
 
 export function useCommandExec() {
+  // Accumulate chunks in refs (O(1) push) to avoid O(n²) array spreading on
+  // every data event. State is synced on an interval and on close.
+  const stdoutRef = useRef<string[]>([]);
+  const stderrRef = useRef<string[]>([]);
+
   const [state, setState] = useState<CommandExecState>({
     stdout: [],
     stderr: [],
@@ -21,35 +26,48 @@ export function useCommandExec() {
   });
 
   const execute = useCallback((command: string) => {
+    stdoutRef.current = [];
+    stderrRef.current = [];
     setState({ stdout: [], stderr: [], exitCode: null, running: true });
 
     const child = spawn(command, { shell: true });
 
+    // Flush accumulated output to state every 100 ms for live display.
+    const flushInterval = setInterval(() => {
+      setState((prev) => ({
+        ...prev,
+        stdout: [...stdoutRef.current],
+        stderr: [...stderrRef.current],
+      }));
+    }, 100);
+
     child.stdout.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      setState((prev) => ({ ...prev, stdout: [...prev.stdout, text] }));
+      stdoutRef.current.push(chunk.toString());
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      setState((prev) => ({ ...prev, stderr: [...prev.stderr, text] }));
+      stderrRef.current.push(chunk.toString());
     });
 
     child.on("close", (code) => {
-      setState((prev) => ({
-        ...prev,
+      clearInterval(flushInterval);
+      setState({
+        stdout: [...stdoutRef.current],
+        stderr: [...stderrRef.current],
         exitCode: code ?? 1,
         running: false,
-      }));
+      });
     });
 
     child.on("error", (err) => {
-      setState((prev) => ({
-        ...prev,
-        stderr: [...prev.stderr, `Process error: ${err.message}\n`],
+      clearInterval(flushInterval);
+      stderrRef.current.push(`Process error: ${err.message}\n`);
+      setState({
+        stdout: [...stdoutRef.current],
+        stderr: [...stderrRef.current],
         exitCode: 1,
         running: false,
-      }));
+      });
     });
   }, []);
 

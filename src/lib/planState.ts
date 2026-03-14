@@ -195,7 +195,10 @@ export function buildPlannerHistory(
       }
     }
 
-    const includeOutput = shouldSendFullOutput(result);
+    // Synthetic plan-ack entries must always surface their stdout to the planner
+    // regardless of the output filter, otherwise the ack message is swallowed.
+    const isPlanAck = result.suggestedCommand === "__plan_acknowledged__";
+    const includeOutput = isPlanAck || shouldSendFullOutput(result);
     let stdoutText: string;
     let stderrText: string;
 

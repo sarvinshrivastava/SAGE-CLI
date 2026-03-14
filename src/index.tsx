@@ -47,7 +47,12 @@ function parseArgs(argv: string[]): ParsedArgs {
   const result: ParsedArgs = {};
   let i = 0;
 
-  const next = (): string | undefined => args[++i];
+  // Only consume the next token as a value if it exists and is not itself a flag.
+  const next = (): string | undefined => {
+    const val = args[i + 1];
+    if (val === undefined || val.startsWith("-")) return undefined;
+    return args[++i];
+  };
 
   while (i < args.length) {
     const arg = args[i]!;
