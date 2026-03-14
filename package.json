@@ -1,0 +1,31 @@
+{
+  "name": "sage-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "sage": "dist/index.js"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.tsx --outdir ./dist --target node --external ink --external react --external ink-text-input --external ink-spinner --external uuid && chmod +x dist/index.js",
+    "dev": "bun run src/index.tsx",
+    "start": "bun dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.4",
+    "uuid": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
