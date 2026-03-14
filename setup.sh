@@ -1,9 +1,8 @@
 #!/bin/bash
+set -e
 
-# Setup Python virtual environment and install dependencies
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Install dependencies and build SAGE CLI
+npm install
+npm run build
 
-# Test run the agent shell
-python3 src/agent_shell.py --planner-timeout 90
+echo "Build complete. Run: node dist/index.js"
