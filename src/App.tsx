@@ -47,6 +47,7 @@ type PhaseState =
   | {
       phase: "executing";
       command: string;
+      originalSuggestion: string;
       safetyDecision: SafetyDecision;
     }
   | { phase: "showChat"; message: string }
@@ -303,10 +304,10 @@ export function App({
     if (phaseState.phase !== "executing") return;
     if (cmdExec.running || cmdExec.exitCode === null) return;
 
-    const { command, safetyDecision } = phaseState;
+    const { command, originalSuggestion, safetyDecision } = phaseState;
 
     const result: CommandResult = {
-      suggestedCommand: command,
+      suggestedCommand: originalSuggestion,
       executedCommand: command,
       stdout: cmdExec.stdout,
       stderr: cmdExec.stderr,
@@ -394,7 +395,9 @@ export function App({
       // accept
       const safetyDecision =
         phaseState.phase === "reviewing" ? phaseState.safetyDecision : policy.evaluate(command);
-      setPhaseState({ phase: "executing", command, safetyDecision });
+      const originalSuggestion =
+        phaseState.phase === "reviewing" ? phaseState.suggestion : command;
+      setPhaseState({ phase: "executing", command, originalSuggestion, safetyDecision });
     },
     [phaseState, policy, finishGoal, logger]
   );

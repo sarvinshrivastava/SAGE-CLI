@@ -5,7 +5,15 @@
 
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { SafetyDecision, SafetyRule as SafetyRuleInterface } from "./types.js";
+
+function expandHome(p: string): string {
+  if (p === "~" || p.startsWith("~/")) {
+    return path.join(os.homedir(), p.slice(1));
+  }
+  return p;
+}
 
 export class SafetyRule {
   pattern: string;
@@ -74,7 +82,7 @@ export class SafetyPolicy {
     candidates.push("safety_policy.json");
 
     for (const candidate of candidates) {
-      const resolved = path.resolve(candidate);
+      const resolved = path.resolve(expandHome(candidate));
       if (!fs.existsSync(resolved)) continue;
 
       let data: unknown;

@@ -21,31 +21,44 @@ interface CommandReviewProps {
   onAction: (action: ReviewAction, command: string) => void;
 }
 
-/** Simple word-level diff between two command strings. */
+/** LCS-based word-level diff between two command strings. */
 function wordDiff(original: string, edited: string) {
   const origWords = original.split(/\s+/);
   const editWords = edited.split(/\s+/);
-  const origSet = new Set(origWords);
-  const editSet = new Set(editWords);
+  const m = origWords.length;
+  const n = editWords.length;
 
-  const tokens: Array<{ text: string; type: "same" | "added" | "removed" }> =
-    [];
-
-  // Use a simple LCS-style approach: iterate edit words and mark
-  let oi = 0;
-  for (const word of editWords) {
-    if (origSet.has(word) && oi < origWords.length && origWords[oi] === word) {
-      tokens.push({ text: word, type: "same" });
-      oi++;
-    } else {
-      tokens.push({ text: word, type: "added" });
+  // Build LCS DP table
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array(n + 1).fill(0)
+  );
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (origWords[i] === editWords[j]) {
+        dp[i]![j] = 1 + dp[i + 1]![j + 1]!;
+      } else {
+        dp[i]![j] = Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+      }
     }
   }
-  // Remaining original words are removed
-  while (oi < origWords.length) {
-    tokens.unshift({ text: origWords[oi]!, type: "removed" });
-    oi++;
+
+  // Traceback to produce tokens in order
+  const tokens: Array<{ text: string; type: "same" | "added" | "removed" }> = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (origWords[i] === editWords[j]) {
+      tokens.push({ text: origWords[i]!, type: "same" });
+      i++; j++;
+    } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) {
+      tokens.push({ text: origWords[i]!, type: "removed" });
+      i++;
+    } else {
+      tokens.push({ text: editWords[j]!, type: "added" });
+      j++;
+    }
   }
+  while (i < m) tokens.push({ text: origWords[i++]!, type: "removed" });
+  while (j < n) tokens.push({ text: editWords[j++]!, type: "added" });
   return tokens;
 }
 

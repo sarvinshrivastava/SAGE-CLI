@@ -53,7 +53,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     const arg = args[i]!;
     if (arg === "--help" || arg === "-h") result.help = true;
     else if (arg === "--planner") result.planner = next();
-    else if (arg === "--planner-timeout") result.plannerTimeout = Number(next());
+    else if (arg === "--planner-timeout") {
+      const val = next();
+      const parsed = val !== undefined ? Number(val) : NaN;
+      if (!isNaN(parsed)) result.plannerTimeout = parsed;
+    }
     else if (arg === "--planner-model") result.plannerModel = next();
     else if (arg === "--planner-version") result.plannerVersion = next();
     else if (arg === "--planner-api-key") result.plannerApiKey = next();

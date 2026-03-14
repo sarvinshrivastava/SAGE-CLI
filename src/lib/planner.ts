@@ -222,11 +222,24 @@ export function buildRepeatFeedback(history: PlannerTurn[]): {
   role: string;
   content: string;
 } {
+  // Find the most recent turn to identify which command repeatedly failed
   const last = history[history.length - 1]!;
-  const prev = history[history.length - 2]!;
-  const commandDisplay =
-    normalizeCommandText(last.executedCommand) ?? last.executedCommand;
-  const note = `AGENT_NOTE: The command '${commandDisplay}' failed twice consecutively with exit codes ${prev.exitCode} and ${last.exitCode}. Provide a different next command that diagnoses the failure or prepares any missing prerequisites. Do not repeat the same command.`;
+  const norm = normalizeCommandText(last.executedCommand) ?? last.executedCommand;
+
+  // Collect the two most recent failures for this specific command
+  const failures: PlannerTurn[] = [];
+  for (let i = history.length - 1; i >= 0 && failures.length < 2; i--) {
+    const turn = history[i]!;
+    if (
+      (normalizeCommandText(turn.executedCommand) ?? turn.executedCommand) === norm &&
+      turn.exitCode !== 0
+    ) {
+      failures.unshift(turn);
+    }
+  }
+
+  const exitCodes = failures.map((t) => t.exitCode).join(" and ");
+  const note = `AGENT_NOTE: The command '${norm}' has failed ${failures.length >= 2 ? "twice" : "repeatedly"} with exit codes ${exitCodes}. Provide a different next command that diagnoses the failure or prepares any missing prerequisites. Do not repeat the same command.`;
   return { role: "user", content: JSON.stringify({ agent_note: note }) };
 }
 
