@@ -9,37 +9,40 @@ SAGE CLI (Smart Agent Goal Execution CLI) is an interactive terminal REPL built 
 ## Setup & Running
 
 ```bash
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 Requires `OPENROUTER_API_KEY` in a `.env` file at the project root.
 
 ```bash
 # Run with OpenRouter (default)
-node dist/index.js
+bun dist/index.js
 
 # Run with local Ollama
-node dist/index.js --planner ollama --planner-model qwen3:8b
+bun dist/index.js --planner ollama --planner-model qwen3:8b
 
 # Run with mock planner (no network needed)
-node dist/index.js --planner mock
+bun dist/index.js --planner mock
+
+# Run directly from source (no build step)
+bun run dev
 
 # Run with config file
-node dist/index.js --config config.json
+bun dist/index.js --config config.json
 ```
 
 ## Validation (No Formal Test Suite)
 
 ```bash
-# Type-check without building
-npx tsc --noEmit
+# Type-check (bun does not type-check; use tsc for that)
+bun run typecheck
 
-# Build
-npm run build
+# Build (bun build — fast bundler, ~7ms)
+bun run build
 
 # Smoke test with mock planner (requires interactive TTY)
-node dist/index.js --planner mock
+bun dist/index.js --planner mock
 ```
 
 ## Architecture

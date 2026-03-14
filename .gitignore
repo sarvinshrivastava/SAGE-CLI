@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# Bun
+.bun-cache/
+
 # IDE and editor settings
 .vscode/
 .idea/

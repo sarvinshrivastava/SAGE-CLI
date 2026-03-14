@@ -7,9 +7,10 @@
     "sage": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/index.js"
+    "build": "bun build ./src/index.tsx --outdir ./dist --target node --external ink --external react --external ink-text-input --external ink-spinner --external uuid && chmod +x dist/index.js",
+    "dev": "bun run src/index.tsx",
+    "start": "bun dist/index.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "ink": "^6.8.0",

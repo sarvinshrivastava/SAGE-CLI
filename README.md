@@ -23,19 +23,22 @@ cd SAGE-CLI
 
 Required setup:
 
-- Node.js 18+
+- [Bun](https://bun.sh) (install via `curl -fsSL https://bun.sh/install | bash`)
 - OpenRouter API access with `OPENROUTER_API_KEY` stored in `.env`.
 - (Optional) `.env` entries for `OPENROUTER_MODEL`, `OPENROUTER_TIMEOUT`, `OPENROUTER_SITE_URL`, or `OPENROUTER_SITE_NAME` to fine-tune requests.
 
 ```bash
 # OpenRouter (default)
-node dist/index.js
+bun dist/index.js
 
 # Local Ollama
-node dist/index.js --planner ollama --planner-model qwen3:8b
+bun dist/index.js --planner ollama --planner-model qwen3:8b
 
 # Mock planner (no network needed)
-node dist/index.js --planner mock
+bun dist/index.js --planner mock
+
+# Run directly from source (no build step needed)
+bun run dev
 ```
 
 ## Key CLI Options
