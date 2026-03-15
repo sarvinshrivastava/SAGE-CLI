@@ -4,6 +4,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import Spinner from "ink-spinner";
 
 interface StreamOutputProps {
   stdout: string[];
@@ -22,19 +23,27 @@ export function StreamOutput({
 }: StreamOutputProps) {
   return (
     <Box flexDirection="column">
-      <Text color="cyan">{"Executing: "}<Text color="white">{command}</Text></Text>
+      <Box flexDirection="row">
+        {running ? (
+          <Text color="cyan"><Spinner type="dots" /></Text>
+        ) : (
+          <Text color="cyan">{"▶"}</Text>
+        )}
+        <Text color="cyan">{" executing: "}</Text>
+        <Text color="white">{command}</Text>
+      </Box>
       {stdout.map((line, i) => (
         <Text key={`out-${i}`} color="green">
           {line.trimEnd()}
         </Text>
       ))}
       {stderr.map((line, i) => (
-        <Text key={`err-${i}`} color="red">
+        <Text key={`err-${i}`} color="yellow">
           {line.trimEnd()}
         </Text>
       ))}
       {!running && exitCode !== null && (
-        <Text color="magenta">{`Exit code: ${exitCode}`}</Text>
+        <Text color={exitCode === 0 ? "green" : "red"}>{`exit: ${exitCode}`}</Text>
       )}
     </Box>
   );

@@ -12,10 +12,11 @@ export interface PlannerTurn {
 }
 
 // PlannerSuggestion indicates the chosen interaction mode
-export type PlannerSuggestion = 
-  | { mode: "command"; command: string }
-  | { mode: "chat"; message: string }
-  | { mode: "plan"; plan: PlannerPlan };
+// thinkContent holds the raw <think>…</think> reasoning text when present
+export type PlannerSuggestion =
+  | { mode: "command"; command: string; thinkContent?: string }
+  | { mode: "chat"; message: string; thinkContent?: string }
+  | { mode: "plan"; plan: PlannerPlan; thinkContent?: string };
 
 // PlanStep represents a single sub-goal within a planner-generated plan
 export interface PlanStep {

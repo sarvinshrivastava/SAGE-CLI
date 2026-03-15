@@ -79,6 +79,7 @@ export function CommandReview({
 
   const level = safetyDecision.level.toLowerCase();
   const riskColor = level === "high" ? "red" : level === "medium" ? "yellow" : "green";
+  const riskLabel = `[ ${safetyDecision.level.toUpperCase()} RISK ]`;
 
   // Keypress handler for review mode
   useInput(
@@ -86,8 +87,6 @@ export function CommandReview({
       if (mode !== "review") return;
       const k = input.toLowerCase();
       if (k === "a" || key.return) {
-        // Accept — require explicit confirmation when safety is on and either
-        // the level is high OR the policy explicitly set requireConfirmation.
         if (
           !safetyDisabled &&
           (level === "high" || safetyDecision.requireConfirmation)
@@ -128,95 +127,93 @@ export function CommandReview({
   const diffTokens =
     activeCommand !== suggested ? wordDiff(suggested, activeCommand) : null;
 
+  const notesText = safetyDecision.notes ?? "";
+
+  // Build history line parts
+  const successCount = priorStats?.successes ?? 0;
+  const failureCount = priorStats?.failures ?? 0;
+  const hasHistory = priorStats && priorStats.total > 0;
+
   return (
     <Box flexDirection="column" marginY={1}>
-      {/* Plan step context */}
-      {planStep && (
-        <Box flexDirection="column">
-          <Text color="cyan">
-            {"Plan step "}{planStep.id}{": "}{planStep.label()}
-          </Text>
-          {planStep.description && (
-            <Text color="cyan">{"Description: "}{planStep.description}</Text>
-          )}
-          {planStep.command && planStep.command !== suggested && (
-            <Text color="cyan">{"Planned command: "}{planStep.command}</Text>
-          )}
+      {/* Main command box */}
+      <Box
+        borderStyle="round"
+        borderColor={mode === "confirm" ? "red" : "gray"}
+        flexDirection="column"
+        paddingX={1}
+      >
+        {/* Header row: label + risk badge */}
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color="gray">{"COMMAND TO EXECUTE:"}</Text>
+          <Text bold color={riskColor as any}>{riskLabel}</Text>
+        </Box>
+
+        {/* Command line */}
+        <Text color="cyan">{"$ "}{activeCommand}</Text>
+
+        {/* History / notes line */}
+        {(hasHistory || notesText) && (
+          <Box flexDirection="row">
+            {hasHistory && (
+              <>
+                <Text color="gray">{"history: "}</Text>
+                <Text color="green">{`${successCount} success`}</Text>
+                <Text color="gray">{" / "}</Text>
+                <Text color={failureCount > 0 ? "red" : "gray"}>{`${failureCount} failure`}</Text>
+              </>
+            )}
+            {hasHistory && notesText && (
+              <Text color="gray">{" | "}</Text>
+            )}
+            {notesText && (
+              <Text color="gray">{notesText}</Text>
+            )}
+          </Box>
+        )}
+        {!hasHistory && !notesText && safetyDisabled && (
+          <Text color="yellow">{"safety checks disabled"}</Text>
+        )}
+      </Box>
+
+      {/* Diff view */}
+      {diffTokens && (
+        <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="row">
+            <Text color="red">{"─ "}</Text>
+            {diffTokens
+              .filter((t) => t.type !== "added")
+              .map((t, i) => (
+                <Text key={i} color={t.type === "removed" ? "red" : undefined}>
+                  {t.text}{" "}
+                </Text>
+              ))}
+          </Box>
+          <Box flexDirection="row">
+            <Text color="green">{"+ "}</Text>
+            {diffTokens
+              .filter((t) => t.type !== "removed")
+              .map((t, i) => (
+                <Text key={i} color={t.type === "added" ? "green" : undefined}>
+                  {t.text}{" "}
+                </Text>
+              ))}
+          </Box>
         </Box>
       )}
 
-      {/* Diff display */}
-      {diffTokens ? (
-        <Box>
-          <Text color="blue">{"Diff (green=added, red=removed): "}</Text>
-          {diffTokens.map((t, i) => (
-            <Text
-              key={i}
-              color={
-                t.type === "added"
-                  ? "green"
-                  : t.type === "removed"
-                  ? "red"
-                  : undefined
-              }
-            >
-              {t.text}{" "}
-            </Text>
-          ))}
-        </Box>
-      ) : (
-        <Text color="green">{"No changes from planner suggestion."}</Text>
-      )}
-
-      {/* Risk level */}
-      <Text>
-        <Text color={riskColor}>{"Risk level: "}</Text>
-        <Text color={riskColor}>{safetyDecision.level.toUpperCase()}</Text>
-      </Text>
-
-      {safetyDecision.notes && (
-        <Text color={riskColor}>{`Notes: ${safetyDecision.notes}`}</Text>
-      )}
-
-      {safetyDisabled && (
-        <Text color="yellow">
-          {"Safety checks disabled — risk assessment is informational only."}
-        </Text>
-      )}
-
-      {/* Scoreboard history */}
-      {priorStats && priorStats.total > 0 && (
-        <Box flexDirection="column">
-          <Text
-            color={
-              priorStats.failures > priorStats.successes
-                ? "red"
-                : priorStats.failures === priorStats.successes
-                ? "yellow"
-                : "green"
-            }
-          >
-            {`History: ${priorStats.successes} success / ${priorStats.failures} failure (score ${priorStats.score})`}
-          </Text>
-          {priorStats.failures > priorStats.successes && (
-            <Text color="yellow">
-              {"Planner has struggled with this command; consider editing further."}
-            </Text>
-          )}
-        </Box>
-      )}
-
-      {/* Action bar or edit input */}
+      {/* Action bar */}
       {mode === "review" && (
-        <Box marginTop={1}>
-          <Text color="cyan">{"Actions: "}</Text>
-          <Text>{"(A)ccept  (E)dit  (S)kip"}</Text>
+        <Box marginTop={1} flexDirection="row">
+          <Text bold>{"(A)"}</Text><Text color="cyan">{"ccept  "}</Text>
+          <Text bold>{"(E)"}</Text><Text color="cyan">{"dit  "}</Text>
+          <Text bold>{"(S)"}</Text><Text color="cyan">{"kip"}</Text>
         </Box>
       )}
 
       {mode === "editing" && (
-        <Box>
-          <Text color="cyan">{"Command> "}</Text>
+        <Box marginTop={1}>
+          <Text color="cyan">{"Command› "}</Text>
           <TextInput
             value={editValue}
             onChange={setEditValue}
@@ -226,12 +223,10 @@ export function CommandReview({
       )}
 
       {mode === "confirm" && (
-        <Box flexDirection="column">
-          <Text color="red" bold>
-            {"HIGH RISK: Type 'proceed' to confirm execution"}
-          </Text>
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="red" bold>{"Type 'proceed' to confirm:"}</Text>
           <Box>
-            <Text color="red">{"Confirm> "}</Text>
+            <Text color="red">{"Confirm› "}</Text>
             <TextInput
               value={confirmValue}
               onChange={setConfirmValue}

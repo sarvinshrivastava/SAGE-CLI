@@ -17,6 +17,10 @@ export class PlannerError extends Error {
 // ---------------------------------------------------------------------------
 
 export function parsePlannerReply(content: string): PlannerSuggestion {
+  // Extract <think>…</think> reasoning before stripping
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
+  const thinkContent = thinkMatch ? thinkMatch[1]!.trim() : undefined;
+
   // Strip <think>...</think> blocks (qwen3 reasoning tokens)
   const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
@@ -28,7 +32,9 @@ export function parsePlannerReply(content: string): PlannerSuggestion {
   }
 
   const suggestion = buildSuggestionFromDict(data);
-  if (suggestion !== null) return suggestion;
+  if (suggestion !== null) {
+    return thinkContent ? { ...suggestion, thinkContent } : suggestion;
+  }
 
   throw new PlannerError(`Planner response missing required fields: ${JSON.stringify(data)}`);
 }

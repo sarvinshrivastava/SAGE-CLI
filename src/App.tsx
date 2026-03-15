@@ -26,9 +26,10 @@ import {
 
 import { GoalPrompt } from "./components/GoalPrompt.js";
 import { StreamOutput } from "./components/StreamOutput.js";
-import { PlanView } from "./components/PlanView.js";
+import { PlanView, PlanStrip } from "./components/PlanView.js";
 import { GoalSummary } from "./components/GoalSummary.js";
 import { CommandReview, ReviewAction } from "./components/CommandReview.js";
+import { OutputLog, LogEntry } from "./components/OutputLog.js";
 import { useCommandExec } from "./hooks/useCommandExec.js";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,6 @@ type PhaseState =
       originalSuggestion: string;
       safetyDecision: SafetyDecision;
     }
-  | { phase: "showChat"; message: string }
   | { phase: "summary"; status: string };
 
 export interface AppProps {
@@ -82,6 +82,14 @@ export function App({
   const [phaseState, setPhaseState] = useState<PhaseState>({ phase: "idle" });
   // planningKey forces the planning effect to re-fire even when phase stays "planning"
   const [planningKey, setPlanningKey] = useState(0);
+  // spinnerLabel drives the loading message shown during the planning phase
+  const [spinnerLabel, setSpinnerLabel] = useState<"thinking" | "planning">("thinking");
+
+  // ---- Persistent output log (survives phase transitions) ----
+  const [outputLog, setOutputLog] = useState<LogEntry[]>([]);
+  const addLog = useCallback((entry: LogEntry) => {
+    setOutputLog((prev) => [...prev, entry]);
+  }, []);
 
   // ---- Cross-goal state (refs — don't drive re-renders directly) ----
   const currentGoalRef = useRef("");
@@ -109,6 +117,11 @@ export function App({
   }, []);
 
   const startPlanning = useCallback(() => {
+    // "thinking" on the first call (no real commands yet); "planning" once commands have run
+    const hasRealHistory = goalHistoryRef.current.some(
+      (r) => r.suggestedCommand !== "__plan_acknowledged__"
+    );
+    setSpinnerLabel(hasRealHistory ? "planning" : "thinking");
     setPhaseState({ phase: "planning" });
     setPlanningKey((k) => k + 1);
   }, []);
@@ -150,9 +163,14 @@ export function App({
         logger.info(`Goal completed status=${status}`);
       }
 
+      // Add summary to the persistent log before transitioning
+      if (history.length > 0) {
+        addLog({ type: "summary", goal, history, status });
+      }
+
       setPhaseState({ phase: "summary", status });
     },
-    [plannerInfo, safetyDisabled, logger]
+    [plannerInfo, safetyDisabled, addLog, logger]
   );
 
   // ---- Planning effect ----
@@ -175,6 +193,7 @@ export function App({
         const msg = err instanceof Error ? err.message : String(err);
         plannerErrorRef.current = msg;
         logger.error(`Planner error: ${msg}`);
+        addLog({ type: "error", message: msg });
         const status = determineStatus(
           goalHistoryRef.current,
           plannerCompletedRef.current,
@@ -191,6 +210,8 @@ export function App({
         const newPlan = convertPlannerPlan(suggestion.plan);
         if (newPlan) {
           activePlanRef.current = newPlan;
+          // Add plan to persistent log
+          addLog({ type: "plan", summary: newPlan.summary, stepCount: newPlan.steps.length });
           // Bug Fix #1: inject plan_acknowledged turn so planner knows plan was received
           goalHistoryRef.current = [
             ...goalHistoryRef.current,
@@ -224,10 +245,19 @@ export function App({
 
       if (suggestion.mode === "chat") {
         const message = suggestion.message ?? "";
+        // Add to persistent log immediately — no more 100ms flash
+        addLog({ type: "chat", message, thinkContent: suggestion.thinkContent });
         conversationRef.current = [...conversationRef.current, message];
         plannerCompletedRef.current = true;
         logger.info(`Planner chat response: ${message}`);
-        setPhaseState({ phase: "showChat", message });
+        // Skip showChat phase entirely — log persists, go straight to finish
+        const status = determineStatus(
+          goalHistoryRef.current,
+          plannerCompletedRef.current,
+          plannerErrorRef.current,
+          userCancelledRef.current
+        );
+        finishGoal(status);
         return;
       }
 
@@ -373,6 +403,17 @@ export function App({
     );
 
     goalHistoryRef.current = [...goalHistoryRef.current, result];
+
+    // Persist command output to the scrollback log
+    addLog({
+      type: "command",
+      command: result.executedCommand,
+      stdout: cmdExec.stdout,
+      stderr: cmdExec.stderr,
+      exitCode: result.returncode,
+      riskLevel: result.riskLevel,
+    });
+
     startPlanning();
   }, [phaseState, cmdExec.running, cmdExec.exitCode]);
 
@@ -424,43 +465,41 @@ export function App({
     (goal: string) => {
       currentGoalRef.current = goal;
       resetGoalState();
+      addLog({ type: "goal", text: goal });
       logger.info(`Goal started: ${goal}`);
       startPlanning();
     },
-    [resetGoalState, startPlanning, logger]
+    [resetGoalState, startPlanning, addLog, logger]
   );
 
   // ---- Summary -> idle transition ----
+  // Summary data is already in outputLog; this phase just briefly shows GoalSummary
+  // then returns to idle. Use a short but visible delay (1.5s).
   useEffect(() => {
     if (phaseState.phase !== "summary") return;
-    const timer = setTimeout(() => setPhaseState({ phase: "idle" }), 100);
+    const timer = setTimeout(() => setPhaseState({ phase: "idle" }), 1500);
     return () => clearTimeout(timer);
   }, [phaseState]);
 
-  // ---- showChat -> idle transition ----
-  useEffect(() => {
-    if (phaseState.phase !== "showChat") return;
-    const timer = setTimeout(() => {
-      const status = determineStatus(
-        goalHistoryRef.current,
-        plannerCompletedRef.current,
-        plannerErrorRef.current,
-        userCancelledRef.current
-      );
-      finishGoal(status);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [phaseState]);
+  // showChat phase no longer used — chat responses go directly to outputLog.
 
   // ---- Render ----
   const renderPhase = () => {
     switch (phaseState.phase) {
-      case "idle":
+      case "idle": {
+        const sessionId = sessionManagerRef.current.enabled
+          ? sessionManagerRef.current.sessionId
+          : null;
+        const sessionInfoParts = [
+          sessionId ? `session ${sessionId}` : null,
+          plannerInfo["backend"],
+          plannerInfo["model"],
+        ].filter(Boolean);
+        const sessionInfo = sessionInfoParts.length > 0
+          ? sessionInfoParts.join(" · ")
+          : undefined;
         return (
           <Box flexDirection="column">
-            {safetyDisabled && (
-              <Text color="yellow">{"Safety checks disabled"}</Text>
-            )}
             {!sessionManagerRef.current.enabled && (
               <Text color="yellow">{"Session persistence disabled"}</Text>
             )}
@@ -472,23 +511,21 @@ export function App({
               }}
               onMeta={(meta) => {
                 handleMeta(meta);
-                // Show session info inline
-                if (["session", "info"].includes(meta)) {
-                  // We can't easily display text inline here without a state update
-                  // The session info will be visible in the log file
-                }
               }}
+              sessionInfo={sessionInfo}
+              safetyDisabled={safetyDisabled}
             />
           </Box>
         );
+      }
 
       case "planning":
         return (
           <Box>
-            <Text color="green">
+            <Text color="cyan">
               <Spinner type="dots" />
             </Text>
-            <Text color="cyan">{" Planning..."}</Text>
+            <Text color="cyan">{" "}{spinnerLabel}{"..."}</Text>
           </Box>
         );
 
@@ -500,37 +537,40 @@ export function App({
         const activePlan = activePlanRef.current;
         const activeStep = activePlan?.currentStep() ?? null;
         return (
-          <CommandReview
-            suggested={phaseState.suggestion}
-            safetyDecision={phaseState.safetyDecision}
-            safetyDisabled={safetyDisabled}
-            priorStats={priorStats}
-            planStep={activeStep}
-            onAction={handleReviewAction}
-          />
+          <Box flexDirection="column">
+            {activePlan && <PlanStrip plan={activePlan} />}
+            <CommandReview
+              suggested={phaseState.suggestion}
+              safetyDecision={phaseState.safetyDecision}
+              safetyDisabled={safetyDisabled}
+              priorStats={priorStats}
+              planStep={activeStep}
+              onAction={handleReviewAction}
+            />
+          </Box>
         );
       }
 
-      case "executing":
+      case "executing": {
+        const activePlan = activePlanRef.current;
         return (
-          <StreamOutput
-            stdout={cmdExec.stdout}
-            stderr={cmdExec.stderr}
-            command={phaseState.command}
-            exitCode={cmdExec.exitCode}
-            running={cmdExec.running}
-          />
-        );
-
-      case "showChat":
-        return (
-          <Box marginY={1}>
-            <Text color="green">{"Assistant: "}</Text>
-            <Text>{phaseState.message}</Text>
+          <Box flexDirection="column">
+            {activePlan && <PlanStrip plan={activePlan} />}
+            <StreamOutput
+              stdout={cmdExec.stdout}
+              stderr={cmdExec.stderr}
+              command={phaseState.command}
+              exitCode={cmdExec.exitCode}
+              running={cmdExec.running}
+            />
           </Box>
         );
+      }
+
+      // showChat is no longer a rendered phase — chat goes straight to outputLog
 
       case "summary":
+        // Summary is already in outputLog; show a brief flash of GoalSummary then idle
         return (
           <GoalSummary
             goal={currentGoalRef.current}
@@ -543,6 +583,7 @@ export function App({
 
   return (
     <Box flexDirection="column">
+      <OutputLog entries={outputLog} />
       {renderPhase()}
     </Box>
   );
