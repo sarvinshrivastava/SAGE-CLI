@@ -28,10 +28,19 @@ export function loadEnvironment(): void {
       if (!stripped.includes("=")) {
         continue;
       }
-      const [key, value] = stripped.split("=", 2);
+      // Strip leading "export " so both `KEY=val` and `export KEY=val` work.
+      const line2 = stripped.replace(/^export\s+/, "");
+      const [key, value] = line2.split("=", 2);
       const keyStr = key.trim();
-      const valueStr = value.trim();
-      
+      let valueStr = value.trim();
+
+      // Strip surrounding quotes and unescape \" inside double-quoted values.
+      if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
+        valueStr = valueStr.slice(1, -1).replace(/\\"/g, '"');
+      } else if (valueStr.startsWith("'") && valueStr.endsWith("'")) {
+        valueStr = valueStr.slice(1, -1);
+      }
+
       // Only set if not already defined
       if (process.env[keyStr] === undefined) {
         process.env[keyStr] = valueStr;

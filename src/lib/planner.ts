@@ -17,6 +17,10 @@ export class PlannerError extends Error {
 // ---------------------------------------------------------------------------
 
 export function parsePlannerReply(content: string): PlannerSuggestion {
+  // Extract <think>…</think> reasoning before stripping
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
+  const thinkContent = thinkMatch ? thinkMatch[1]!.trim() : undefined;
+
   // Strip <think>...</think> blocks (qwen3 reasoning tokens)
   const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
@@ -28,9 +32,43 @@ export function parsePlannerReply(content: string): PlannerSuggestion {
   }
 
   const suggestion = buildSuggestionFromDict(data);
-  if (suggestion !== null) return suggestion;
+  if (suggestion !== null) {
+    return thinkContent ? { ...suggestion, thinkContent } : suggestion;
+  }
 
   throw new PlannerError(`Planner response missing required fields: ${JSON.stringify(data)}`);
+}
+
+/**
+ * Extracts all top-level balanced {...} substrings from s.
+ * Handles nested objects and skips braces inside string literals.
+ */
+function extractBalancedObjects(s: string): string[] {
+  const results: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] !== "{") { i++; continue; }
+    let depth = 0;
+    let inStr = false;
+    let j = i;
+    while (j < s.length) {
+      const ch = s[j]!;
+      if (inStr) {
+        if (ch === "\\" ) { j += 2; continue; }
+        if (ch === "\"") inStr = false;
+      } else {
+        if (ch === "\"") inStr = true;
+        else if (ch === "{") depth++;
+        else if (ch === "}") {
+          depth--;
+          if (depth === 0) { results.push(s.slice(i, j + 1)); break; }
+        }
+      }
+      j++;
+    }
+    i = j + 1;
+  }
+  return results;
 }
 
 function parseFirstJson(cleaned: string): Record<string, unknown> | null {
@@ -47,10 +85,9 @@ function parseFirstJson(cleaned: string): Record<string, unknown> | null {
     if (block) candidates.push(block);
   }
 
-  // Any {...} span
-  const braceMatches = [...cleaned.matchAll(/\{[\s\S]*?\}/g)];
-  for (const m of braceMatches) {
-    const snippet = m[0]!.trim();
+  // Any balanced {...} span — walks the string tracking depth so nested
+  // objects (e.g. plan mode responses) are captured intact.
+  for (const snippet of extractBalancedObjects(cleaned)) {
     if (!candidates.includes(snippet)) candidates.push(snippet);
   }
 
@@ -177,15 +214,24 @@ function buildPlanFromMapping(rawPlan: unknown): PlannerPlan | null {
 }
 
 function repairSimpleCommandJson(fragment: string): string | null {
+  // Only attempt repair on simple single-object command fragments.
+  // Plan and chat responses are structurally complex — misrepairing them
+  // causes silent data corruption that's worse than a clean parse failure.
+  if (/"mode"\s*:\s*"(plan|chat)"/.test(fragment)) return null;
+  if (/"steps"\s*:/.test(fragment)) return null;
+  if ((fragment.match(/\{/g) ?? []).length > 1) return null;
+
   const match = fragment.match(/"command"\s*:\s*([^\s"}][^}\n]*)/);
   if (!match) return null;
-  let value = match[1]!.trim().replace(/,$/, "").replace(/"$/, "");
-  if (!value) return null;
-  const repaired = fragment.replace(
+  const raw = match[1]!.trim().replace(/,$/, "");
+  if (!raw) return null;
+
+  // Use JSON.stringify for correct escaping of backslashes, quotes, and
+  // control characters — raw template interpolation produces invalid JSON.
+  return fragment.replace(
     /"command"\s*:\s*([^\s"}][^}\n]*)/,
-    `"command": "${value}"`
+    `"command": ${JSON.stringify(raw)}`
   );
-  return repaired;
 }
 
 export function normalizeCommandText(command: string | null | undefined): string | null {
@@ -250,12 +296,13 @@ export function buildRepeatFeedback(history: PlannerTurn[]): {
 export abstract class CommandPlanner {
   abstract suggest(
     goal: string,
-    history?: PlannerTurn[]
+    history?: PlannerTurn[],
+    signal?: AbortSignal
   ): Promise<PlannerSuggestion>;
 }
 
 export class MockCommandPlanner extends CommandPlanner {
-  async suggest(goal: string, _history?: PlannerTurn[]): Promise<PlannerSuggestion> {
+  async suggest(goal: string, _history?: PlannerTurn[], _signal?: AbortSignal): Promise<PlannerSuggestion> {
     return { mode: "command", command: `echo Mock planner received goal: ${goal}` };
   }
 }
@@ -278,10 +325,12 @@ const SYSTEM_PROMPT =
   "RULES:\n" +
   "1. Clarify unclear goals or missing details using chat mode.\n" +
   "2. Use plan mode when the goal requires multiple coordinated steps. Provide 3-7 ordered steps with unique string IDs, concise titles, and optional commands/descriptions. Default step status is 'pending'.\n" +
+  "   If a step fails and the remaining strategy must change, you may return a new plan at any time — completed steps will be preserved and the remaining steps replaced with your revised plan.\n" +
   "3. When giving commands:\n" +
   "   - Prefer stable, idempotent, and widely supported tools.\n" +
   "   - Use `apt-get` instead of `apt`, `systemctl` instead of service scripts.\n" +
   "   - Avoid `sudo` or privileged operations unless absolutely necessary or explicitly allowed by the user.\n" +
+  "   - Always emit exactly ONE command per response. Never chain commands with `&&`, `;`, or `|` unless the entire expression is a single logical unit (e.g. a pipe to filter output). Issue each step as its own command response.\n" +
   "4. After each command execution, you will receive `exit_code` and `output`:\n" +
   "   - If successful: plan the next logical step.\n" +
   "   - If failed: propose a diagnostic or remediation command.\n" +
@@ -296,8 +345,10 @@ const SYSTEM_PROMPT =
   "10. Assume commands will be executed in a real shell; always prioritize safety and reversibility.\n\n" +
   "EXAMPLES:\n" +
   "Goal: Install nginx and start the service\n" +
-  "→ {\"mode\": \"command\", \"command\": \"sudo apt-get update -y && sudo apt-get install -y nginx\"}\n" +
-  "→ {\"mode\": \"command\", \"command\": \"sudo systemctl start nginx && sudo systemctl enable nginx\"}\n" +
+  "→ {\"mode\": \"command\", \"command\": \"apt-get update -y\"}\n" +
+  "→ {\"mode\": \"command\", \"command\": \"apt-get install -y nginx\"}\n" +
+  "→ {\"mode\": \"command\", \"command\": \"systemctl start nginx\"}\n" +
+  "→ {\"mode\": \"command\", \"command\": \"systemctl enable nginx\"}\n" +
   "→ {\"mode\": \"command\", \"command\": \"DONE\"}\n\n" +
   "Goal: Provision a new web server stack\n" +
   "→ {\"mode\": \"plan\", \"plan\": {\"summary\": \"Deploy nginx with app code and SSL\", \"steps\": [" +
@@ -334,11 +385,8 @@ export class OpenRouterPlanner extends CommandPlanner {
       "deepseek/deepseek-r1-0528-qwen3-8b:free";
     this.timeout = this._resolveTimeout(opts.timeout);
     this.apiKey = opts.apiKey ?? process.env["OPENROUTER_API_KEY"] ?? null;
-    if (!this.apiKey) {
-      throw new PlannerError(
-        "OpenRouter API key missing; set OPENROUTER_API_KEY or use --planner-api-key"
-      );
-    }
+    // API key validation moved to _chatOnce() so subclasses (e.g. OllamaPlanner)
+    // can extend without needing a dummy key to bypass this guard.
     this.baseUrl =
       opts.baseUrl ??
       process.env["OPENROUTER_BASE_URL"] ??
@@ -348,12 +396,12 @@ export class OpenRouterPlanner extends CommandPlanner {
     this.version = opts.version ?? process.env["OPENROUTER_PLANNER_VERSION"] ?? null;
   }
 
-  async suggest(goal: string, history: PlannerTurn[] = []): Promise<PlannerSuggestion> {
+  async suggest(goal: string, history: PlannerTurn[] = [], signal?: AbortSignal): Promise<PlannerSuggestion> {
     const baseMessages = this._buildMessages(goal, history);
     let messages = [...baseMessages];
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const payload = await this._chat(messages);
+      const payload = await this._chat(messages, signal);
       const content = this._extractContent(payload);
       const suggestion = parsePlannerReply(content);
 
@@ -374,7 +422,66 @@ export class OpenRouterPlanner extends CommandPlanner {
     throw new PlannerError("Planner could not provide a non-repeated command");
   }
 
-  protected async _chat(messages: object[]): Promise<Record<string, unknown>> {
+  /**
+   * Replaces any occurrence of the API key in a string with [REDACTED] so it
+   * cannot leak into logs, telemetry, or error messages surfaced to the user.
+   */
+  private _scrubKey(message: string): string {
+    if (!this.apiKey) return message;
+    return message.split(this.apiKey).join("[REDACTED]");
+  }
+
+  /**
+   * Retry wrapper: up to MAX_RETRIES attempts with exponential backoff + jitter.
+   * Retries on network errors, HTTP 429, and HTTP 5xx. Respects Retry-After.
+   */
+  protected async _chat(messages: object[], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 500;
+    const MAX_DELAY_MS = 10_000;
+
+    let lastErr: PlannerError | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Propagate user-initiated aborts immediately without retry.
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      if (attempt > 0) {
+        const exp = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+        const jitter = exp * 0.2 * (Math.random() * 2 - 1);
+        await new Promise((r) => setTimeout(r, Math.round(exp + jitter)));
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      }
+      try {
+        return await this._chatOnce(messages, signal);
+      } catch (err) {
+        // AbortErrors (user cancel or timeout) bypass the retry loop.
+        if (err instanceof Error && err.name === "AbortError") throw err;
+        if (!(err instanceof PlannerError)) throw err;
+        lastErr = err;
+        // Only retry on transient errors
+        const msg = err.message;
+        const isTransient =
+          msg.startsWith("Failed to contact") ||
+          /returned status (429|5\d\d)/.test(msg);
+        if (!isTransient || attempt === MAX_RETRIES) break;
+
+        // Honour Retry-After for 429
+        const raMatch = msg.match(/Retry-After:\s*(\d+)/i);
+        if (raMatch) {
+          const retryAfterMs = parseInt(raMatch[1]!, 10) * 1000;
+          await new Promise((r) => setTimeout(r, Math.min(retryAfterMs, MAX_DELAY_MS)));
+        }
+      }
+    }
+    throw lastErr!;
+  }
+
+  protected async _chatOnce(messages: object[], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.apiKey) {
+      throw new PlannerError(
+        "OpenRouter API key missing; set OPENROUTER_API_KEY or use --planner-api-key"
+      );
+    }
+
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
@@ -384,29 +491,43 @@ export class OpenRouterPlanner extends CommandPlanner {
 
     const body = { model: this.model, messages };
 
+    // Combine user-supplied abort signal with the per-request timeout so both
+    // can independently cancel the fetch.
+    const timeoutMs = this.timeout * 1000;
+    const fetchSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
+
     let response: Response;
     try {
       response = await fetch(this.baseUrl, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeout * 1000),
+        signal: fetchSignal,
       });
     } catch (err) {
-      throw new PlannerError(`Failed to contact OpenRouter service: ${err}`);
+      // Re-throw AbortErrors unwrapped so callers can distinguish user-cancel
+      // from PlannerErrors.
+      if (err instanceof Error && err.name === "AbortError") throw err;
+      throw new PlannerError(
+        `Failed to contact OpenRouter service: ${this._scrubKey(String(err))}`
+      );
     }
 
     if (!response.ok) {
+      const retryAfter = response.headers.get("Retry-After");
       const text = await response.text();
+      const suffix = retryAfter ? ` Retry-After: ${retryAfter}` : "";
       throw new PlannerError(
-        `OpenRouter returned status ${response.status}: ${text}`
+        `OpenRouter returned status ${response.status}: ${this._scrubKey(text)}${suffix}`
       );
     }
 
     let data: unknown;
     try {
       data = await response.json();
-    } catch (err) {
+    } catch {
       throw new PlannerError(`Invalid JSON response from OpenRouter`);
     }
 
@@ -479,14 +600,10 @@ export class OllamaPlanner extends OpenRouterPlanner {
   private static readonly DEFAULT_MODEL = "qwen3:8b";
 
   constructor(opts: PlannerOptions = {}) {
-    // Call super with a dummy api key to bypass requirement, then override
-    const resolvedOpts: PlannerOptions = {
-      ...opts,
-      apiKey: opts.apiKey ?? "__ollama_no_key__",
-    };
-    super(resolvedOpts);
+    super(opts);
 
-    // Override model/url for Ollama
+    // Override model/url/key for Ollama — no API key required.
+    this.apiKey = null;
     this.model =
       opts.model ??
       process.env["OLLAMA_MODEL"] ??
@@ -501,12 +618,17 @@ export class OllamaPlanner extends OpenRouterPlanner {
     this.version = opts.version ?? process.env["AGENT_PLANNER_VERSION"] ?? null;
   }
 
-  protected async _chat(messages: object[]): Promise<Record<string, unknown>> {
+  protected async _chatOnce(messages: object[], signal?: AbortSignal): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.referer) headers["HTTP-Referer"] = this.referer;
     if (this.title) headers["X-Title"] = this.title;
 
     const body = { model: this.model, messages };
+
+    const timeoutMs = this.timeout * 1000;
+    const fetchSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
 
     let response: Response;
     try {
@@ -514,15 +636,18 @@ export class OllamaPlanner extends OpenRouterPlanner {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeout * 1000),
+        signal: fetchSignal,
       });
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") throw err;
       throw new PlannerError(`Failed to contact Ollama service: ${err}`);
     }
 
     if (!response.ok) {
+      const retryAfter = response.headers.get("Retry-After");
       const text = await response.text();
-      throw new PlannerError(`Ollama returned status ${response.status}: ${text}`);
+      const suffix = retryAfter ? ` Retry-After: ${retryAfter}` : "";
+      throw new PlannerError(`Ollama returned status ${response.status}: ${text}${suffix}`);
     }
 
     let data: unknown;

@@ -75,10 +75,13 @@ export class PlanStepState {
 export class PlanState {
   summary: string | null;
   steps: PlanStepState[];
+  /** Incremented each time the plan is revised mid-execution. Starts at 0. */
+  revision: number;
 
-  constructor(summary: string | null, steps: PlanStepState[]) {
+  constructor(summary: string | null, steps: PlanStepState[], revision = 0) {
     this.summary = summary;
     this.steps = steps;
+    this.revision = revision;
   }
 
   currentStep(): PlanStepState | null {
@@ -108,6 +111,7 @@ export class PlanState {
   toDict(): Record<string, unknown> {
     return {
       summary: this.summary,
+      revision: this.revision,
       steps: this.steps.map((step) => ({
         id: step.id,
         title: step.title,
@@ -119,6 +123,90 @@ export class PlanState {
       })),
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Immutable plan update helpers (avoid in-place mutation during render)
+// ---------------------------------------------------------------------------
+
+/** Returns a new PlanState with the given step's status set to "in_progress". */
+export function withMarkRunning(plan: PlanState, stepId: string): PlanState {
+  return new PlanState(
+    plan.summary,
+    plan.steps.map((s) =>
+      s.id === stepId && s.status !== "completed"
+        ? new PlanStepState({ ...s, status: "in_progress" })
+        : s
+    )
+  );
+}
+
+/** Returns a new PlanState with the given step's result recorded. */
+export function withRecordResult(
+  plan: PlanState,
+  stepId: string,
+  success: boolean,
+  historyIndex: number | null
+): PlanState {
+  return new PlanState(
+    plan.summary,
+    plan.steps.map((s) => {
+      if (s.id !== stepId) return s;
+      const indices =
+        historyIndex !== null
+          ? [...s.historyIndices, historyIndex]
+          : s.historyIndices;
+      return new PlanStepState({
+        ...s,
+        historyIndices: indices,
+        status: success ? "completed" : "failed",
+      });
+    })
+  );
+}
+
+/**
+ * Merges a newly-received plan into an active plan mid-execution.
+ *
+ * Strategy:
+ *  - Completed steps from the old plan are preserved verbatim at the front.
+ *  - All remaining (pending/failed/in_progress) steps are replaced by the new
+ *    plan's steps.  New step IDs are prefixed with `r<revision>-` to guarantee
+ *    uniqueness and make revision boundaries visible in telemetry.
+ *
+ * Returns the merged plan (revision incremented) plus counts of kept/replaced
+ * steps for display in the UI.
+ */
+export function mergePlan(
+  oldPlan: PlanState,
+  newPlan: PlannerPlan
+): { merged: PlanState; keptCount: number; replacedCount: number } {
+  const nextRevision = oldPlan.revision + 1;
+  const prefix = `r${nextRevision}-`;
+
+  const kept = oldPlan.steps.filter((s) => s.status === "completed");
+
+  const newSteps = (newPlan.steps ?? []).map((raw, idx) => {
+    const statusClean =
+      typeof raw.status === "string" && raw.status.trim()
+        ? raw.status.trim().toLowerCase()
+        : "pending";
+    return new PlanStepState({
+      id: `${prefix}${raw.id ?? String(idx + 1)}`,
+      title: raw.title,
+      command: raw.command,
+      description: raw.description,
+      status: statusClean || "pending",
+    });
+  });
+
+  const merged = new PlanState(
+    newPlan.summary ?? oldPlan.summary,
+    [...kept, ...newSteps],
+    nextRevision
+  );
+
+  return { merged, keptCount: kept.length, replacedCount: newSteps.length };
 }
 
 // ---------------------------------------------------------------------------

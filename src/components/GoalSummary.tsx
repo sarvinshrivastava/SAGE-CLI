@@ -14,36 +14,53 @@ interface GoalSummaryProps {
   status: string;
 }
 
+const CMD_WIDTH = 36;
+const DIVIDER = " " + "─".repeat(57);
+
 export function GoalSummary({ goal, history, status }: GoalSummaryProps) {
   if (history.length === 0) return null;
 
+  const statusColor = status === "success" ? "green" : status === "failed" ? "red" : "yellow";
+
   return (
     <Box flexDirection="column" marginY={1}>
-      <Text bold>{`Goal summary (${status}):`}</Text>
+      <Text bold>
+        {"Goal: "}{goal}{" ("}
+        <Text color={statusColor as any}>{status}</Text>
+        {")"}
+      </Text>
+      {/* Column headers */}
+      <Text color="gray">
+        {" #  "}
+        {"Command".padEnd(CMD_WIDTH)}
+        {"Exit  "}
+        {"Risk      "}
+        {"Outcome"}
+      </Text>
+      <Text color="gray">{DIVIDER}</Text>
       {history.map((result, idx) => {
         const outcome = result.returncode === 0 ? "ok" : "fail";
         const outcomeColor = result.returncode === 0 ? "green" : "red";
+        const exitColor = result.returncode === 0 ? "green" : "red";
+        const riskColor =
+          result.riskLevel === "high"
+            ? "red"
+            : result.riskLevel === "medium"
+            ? "yellow"
+            : "green";
+        const num = String(idx + 1).padStart(2);
+        const cmd = truncateCommand(result.suggestedCommand).padEnd(CMD_WIDTH);
+        const exit = String(result.returncode).padStart(4);
+        const risk = result.riskLevel.toUpperCase().padEnd(10);
+
         return (
-          <Text key={idx}>
-            {"  "}
-            {idx + 1}. {truncateCommand(result.suggestedCommand)}
-            {" | exit "}
-            <Text color={outcomeColor}>{result.returncode}</Text>
-            {" | risk "}
-            <Text
-              color={
-                result.riskLevel === "high"
-                  ? "red"
-                  : result.riskLevel === "medium"
-                  ? "yellow"
-                  : "green"
-              }
-            >
-              {result.riskLevel.toUpperCase()}
-            </Text>
-            {" | "}
-            <Text color={outcomeColor}>{outcome}</Text>
-          </Text>
+          <Box key={idx} flexDirection="row">
+            <Text>{` ${num}  ${cmd}`}</Text>
+            <Text color={exitColor as any}>{exit}</Text>
+            <Text>{"  "}</Text>
+            <Text color={riskColor as any}>{risk}</Text>
+            <Text color={outcomeColor as any}>{outcome}</Text>
+          </Box>
         );
       })}
     </Box>

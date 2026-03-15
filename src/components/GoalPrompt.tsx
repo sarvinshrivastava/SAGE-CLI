@@ -10,9 +10,11 @@ interface GoalPromptProps {
   onGoal: (goal: string) => void;
   onExit: () => void;
   onMeta?: (meta: string) => void;
+  sessionInfo?: string;
+  safetyDisabled?: boolean;
 }
 
-export function GoalPrompt({ onGoal, onExit, onMeta }: GoalPromptProps) {
+export function GoalPrompt({ onGoal, onExit, onMeta, sessionInfo, safetyDisabled }: GoalPromptProps) {
   const [value, setValue] = useState("");
 
   const handleSubmit = (text: string) => {
@@ -35,9 +37,17 @@ export function GoalPrompt({ onGoal, onExit, onMeta }: GoalPromptProps) {
   };
 
   return (
-    <Box>
-      <Text color="cyan">{"User> "}</Text>
-      <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} />
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        <Text bold color="cyan">{"User› "}</Text>
+        <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} />
+        {safetyDisabled && (
+          <Text color="yellow">{"  ⚠ safety off"}</Text>
+        )}
+      </Box>
+      {sessionInfo && (
+        <Text color="gray">{sessionInfo}</Text>
+      )}
     </Box>
   );
 }

@@ -8,7 +8,33 @@ import path from "path";
 
 export type LogLevel = "INFO" | "WARNING" | "ERROR";
 
-export class Logger {
+/** Interface for logger consumers — allows injection of test doubles or alternative loggers. */
+export interface LoggerLike {
+  info(message: string): void;
+  warning(message: string): void;
+  error(message: string): void;
+  /** Returns a new logger that prepends [key=value] tags to every message. */
+  withContext(tags: Record<string, string>): LoggerLike;
+}
+
+/** Lightweight wrapper that prefixes structured context tags to log messages. */
+class ContextLogger implements LoggerLike {
+  constructor(private readonly base: LoggerLike, private readonly prefix: string) {}
+  info(msg: string)    { this.base.info(`${this.prefix} ${msg}`); }
+  warning(msg: string) { this.base.warning(`${this.prefix} ${msg}`); }
+  error(msg: string)   { this.base.error(`${this.prefix} ${msg}`); }
+  withContext(tags: Record<string, string>): LoggerLike {
+    const extra = Object.entries(tags).map(([k, v]) => `[${k}=${v}]`).join(" ");
+    return new ContextLogger(this.base, `${this.prefix} ${extra}`);
+  }
+}
+
+export class Logger implements LoggerLike {
+  withContext(tags: Record<string, string>): LoggerLike {
+    const prefix = Object.entries(tags).map(([k, v]) => `[${k}=${v}]`).join(" ");
+    return new ContextLogger(this, prefix);
+  }
+
   private filePath: string;
   private enabled: boolean;
 
