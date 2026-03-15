@@ -41,10 +41,22 @@ export class CommandScoreboard {
   private _scores: Map<string, CommandStats> = new Map();
 
   static _normalize(command: string): string {
-    // Collapse whitespace — simple split/join (no shlex needed)
-    const parts = command.trim().split(/\s+/);
-    const normalized = parts.join(" ").trim();
-    return normalized || command.trim();
+    let s = command.trim().replace(/\s+/g, " ");
+
+    // Normalize home-relative paths (~/foo/bar → <path>) before absolute paths
+    // so the ~/ prefix is consumed first.
+    s = s.replace(/~\/\S*/g, "<path>");
+
+    // Normalize absolute paths (/foo, /foo/bar/baz → <path>).
+    // Requires at least one leading slash followed by a non-space char so we
+    // don't accidentally match lone `-` flags or redirect operators.
+    s = s.replace(/\/[^\s/][^\s]*/g, "<path>");
+
+    // Normalize flag values (--output=<anything> → --output=<val>) so
+    // --timeout=30 and --timeout=60 map to the same scoreboard key.
+    s = s.replace(/(--[\w-]+=)\S+/g, "$1<val>");
+
+    return s || command.trim();
   }
 
   analyze(command: string): [string, CommandStats | null] {

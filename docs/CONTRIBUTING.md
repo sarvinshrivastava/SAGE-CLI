@@ -24,6 +24,7 @@ bun dist/index.js --planner mock   # smoke test without network
    ```bash
    bun run typecheck   # tsc --noEmit  (Bun does not type-check at bundle time)
    bun run build       # must succeed with no errors
+   bun test            # unit tests for planner, planState, safety, scoreboard
    bun dist/index.js --planner mock   # interactive smoke test
    ```
 4. Update documentation in `README.md` or `docs/` whenever behaviour or UX changes.
@@ -66,13 +67,30 @@ src/
     PlanView.tsx       # PlanStrip (horizontal) + PlanView (vertical)
     GoalSummary.tsx    # End-of-goal result table
     OutputLog.tsx      # Persistent scrollback log
+    ErrorBoundary.tsx  # Render error safety net
   hooks/
     useCommandExec.ts  # spawn() wrapper with buffered streaming
+  __tests__/
+    planner.test.ts    # JSON parsing, plan mode, repeated failure detection
+    planState.test.ts  # PlanState, plan merging, history building
+    safety.test.ts     # SafetyPolicy rule evaluation and priority ordering
+    scoreboard.test.ts # CommandScoreboard normalization and stats
 ```
 
 ## Tests & Validation
 
-No formal test suite exists yet. Contributors are expected to:
+```bash
+bun test   # runs all unit tests in src/__tests__/
+```
+
+The unit test suite covers:
+
+- **planner.test.ts** — JSON parsing, three-mode detection, repeated failure guard
+- **planState.test.ts** — PlanState lifecycle, plan merging, `buildPlannerHistory` annotations
+- **safety.test.ts** — rule evaluation, first-match priority, `allowed_flags` logic
+- **scoreboard.test.ts** — command normalization, success/failure counting
+
+In addition to passing `bun test`, contributors are expected to:
 
 - Pass `bun run typecheck` (zero TypeScript errors) before committing.
 - Verify all five UI phases manually with the mock planner: `bun dist/index.js --planner mock`.

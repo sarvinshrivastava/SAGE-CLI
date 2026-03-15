@@ -16,6 +16,8 @@ import { SafetyPolicy } from "./lib/safety.js";
 import { createPlanner, PlannerError } from "./lib/planner.js";
 import { Logger } from "./lib/logger.js";
 import { App } from "./App.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { activeKill } from "./hooks/useCommandExec.js";
 
 // ---------------------------------------------------------------------------
 // Simple arg parser (no external dependency)
@@ -105,7 +107,8 @@ Options:
   --safety-off              Disable safety checks
   --safety-policy <path>    Path to safety policy file
   --log-file <path>         Path to log file
-  --telemetry-file <path>   Path to telemetry JSONL file (empty to disable)
+  --telemetry-file <path>   Path to telemetry JSONL file (default: logs/telemetry.jsonl)
+  --telemetry-file ""       Disable telemetry entirely (privacy opt-out)
   -h, --help                Show this help
 `);
 }
@@ -194,6 +197,7 @@ async function main() {
   // 6. Initialize subsystems
   const logger = Logger.initialize(logFile);
   const telemetry = TelemetryEmitterImpl.initialize(telemetryFile);
+  telemetry.setLogger(logger);
   const sessionManager = SessionManagerImpl.initialize(
     sessionDir ?? null,
     sessionId ?? null,
@@ -229,17 +233,30 @@ async function main() {
   logger.info(`SAGE CLI starting — planner=${plannerName}`);
   logger.info(sessionManager.describe());
 
+  // Kill any active child process on termination so we don't orphan spawned
+  // shells. Exit codes follow Unix convention: 128 + signal number.
+  process.on("SIGINT", () => {
+    activeKill?.();
+    process.exit(130);
+  });
+  process.on("SIGTERM", () => {
+    activeKill?.();
+    process.exit(143);
+  });
+
   // 9. Render app
   render(
-    <App
-      planner={plannerInstance}
-      policy={policy}
-      telemetry={telemetry}
-      sessionManager={sessionManager}
-      logger={logger}
-      plannerInfo={plannerInfo}
-      safetyDisabled={safetyDisabled}
-    />
+    <ErrorBoundary>
+      <App
+        planner={plannerInstance}
+        policy={policy}
+        telemetry={telemetry}
+        sessionManager={sessionManager}
+        logger={logger}
+        plannerInfo={plannerInfo}
+        safetyDisabled={safetyDisabled}
+      />
+    </ErrorBoundary>
   );
 }
 

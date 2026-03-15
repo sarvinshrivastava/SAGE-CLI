@@ -85,8 +85,22 @@ export class SessionManagerImpl implements SessionManager {
       steps: [...steps],
       metadata: metadata || {},
     };
+    const line = JSON.stringify(entry) + "\n";
     try {
-      fs.appendFileSync(this.path, JSON.stringify(entry) + "\n", "utf-8");
+      // Open in append mode and capture pre-write size so we can roll back a
+      // partial/corrupt write (e.g. mid-crash) by truncating to prevSize.
+      const fd = fs.openSync(this.path, "a");
+      try {
+        const prevSize = fs.fstatSync(fd).size;
+        try {
+          fs.writeSync(fd, line);
+        } catch (writeErr) {
+          try { fs.ftruncateSync(fd, prevSize); } catch { /* best-effort rollback */ }
+          throw writeErr;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
     } catch (exc: any) {
       console.warn(`Warning: failed to persist session data: ${exc.message}`);
     }
@@ -94,6 +108,10 @@ export class SessionManagerImpl implements SessionManager {
 
   static _generateId(): string {
     const now = new Date();
-    return now.toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+    // Include milliseconds to avoid second-level collisions, plus a random
+    // hex suffix for safety on rapid restarts within the same millisecond.
+    const ts = now.toISOString().slice(0, 23).replace(/[-:.T]/g, "");
+    const rand = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+    return `${ts.slice(0, 8)}-${ts.slice(8, 14)}-${ts.slice(14)}${rand}`;
   }
 }

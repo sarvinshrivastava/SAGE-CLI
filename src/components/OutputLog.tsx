@@ -17,6 +17,7 @@ export type LogEntry =
   | { type: "chat"; message: string; thinkContent?: string }
   | { type: "command"; command: string; stdout: string[]; stderr: string[]; exitCode: number; riskLevel: string }
   | { type: "plan"; summary: string | null; stepCount: number }
+  | { type: "replan"; revision: number; summary: string | null; keptCount: number; replacedCount: number }
   | { type: "summary"; goal: string; history: CommandResult[]; status: string }
   | { type: "error"; message: string };
 
@@ -100,6 +101,29 @@ function PlanEntry({ summary, stepCount }: { summary: string | null; stepCount: 
   );
 }
 
+function ReplanEntry({
+  revision, summary, keptCount, replacedCount,
+}: {
+  revision: number;
+  summary: string | null;
+  keptCount: number;
+  replacedCount: number;
+}) {
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="row">
+        <Text color="yellow">{"↻ plan revised"}</Text>
+        <Text color="gray">{" (revision "}{revision}{")"}</Text>
+      </Box>
+      {summary && <Text color="gray">{"  "}{summary}</Text>}
+      <Text color="gray">
+        {"  "}{keptCount}{" step"}{keptCount !== 1 ? "s" : ""}{" kept · "}
+        {replacedCount}{" step"}{replacedCount !== 1 ? "s" : ""}{" replaced"}
+      </Text>
+    </Box>
+  );
+}
+
 function SummaryEntry({
   goal, history, status,
 }: {
@@ -170,6 +194,16 @@ export function OutputLog({ entries }: OutputLogProps) {
             );
           case "plan":
             return <PlanEntry key={i} summary={entry.summary} stepCount={entry.stepCount} />;
+          case "replan":
+            return (
+              <ReplanEntry
+                key={i}
+                revision={entry.revision}
+                summary={entry.summary}
+                keptCount={entry.keptCount}
+                replacedCount={entry.replacedCount}
+              />
+            );
           case "summary":
             return <SummaryEntry key={i} goal={entry.goal} history={entry.history} status={entry.status} />;
           case "error":

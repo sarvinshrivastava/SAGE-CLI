@@ -19,6 +19,8 @@ interface CommandReviewProps {
   priorStats: CommandStats | null;
   planStep: PlanStepState | null;
   onAction: (action: ReviewAction, command: string) => void;
+  /** Called to re-evaluate risk whenever the user edits the command. */
+  evaluate: (cmd: string) => SafetyDecision;
 }
 
 /** LCS-based word-level diff between two command strings. */
@@ -71,15 +73,19 @@ export function CommandReview({
   priorStats,
   planStep,
   onAction,
+  evaluate,
 }: CommandReviewProps) {
   const [mode, setMode] = useState<Mode>("review");
   const [editValue, setEditValue] = useState(suggested);
   const [confirmValue, setConfirmValue] = useState("");
   const [activeCommand, setActiveCommand] = useState(suggested);
+  // Re-evaluated each time the user edits the command so the risk badge and
+  // confirm-gate always reflect the *actual* command about to be executed.
+  const [activeDecision, setActiveDecision] = useState(safetyDecision);
 
-  const level = safetyDecision.level.toLowerCase();
+  const level = activeDecision.level.toLowerCase();
   const riskColor = level === "high" ? "red" : level === "medium" ? "yellow" : "green";
-  const riskLabel = `[ ${safetyDecision.level.toUpperCase()} RISK ]`;
+  const riskLabel = `[ ${activeDecision.level.toUpperCase()} RISK ]`;
 
   // Keypress handler for review mode
   useInput(
@@ -89,7 +95,7 @@ export function CommandReview({
       if (k === "a" || key.return) {
         if (
           !safetyDisabled &&
-          (level === "high" || safetyDecision.requireConfirmation)
+          (level === "high" || activeDecision.requireConfirmation)
         ) {
           setConfirmValue("");
           setMode("confirm");
@@ -113,6 +119,9 @@ export function CommandReview({
       return;
     }
     setActiveCommand(trimmed);
+    // Re-evaluate safety against the edited command so the risk badge and
+    // confirm gate reflect what will actually be executed.
+    setActiveDecision(safetyDisabled ? { level: "low", requireConfirmation: false } : evaluate(trimmed));
     setMode("review");
   };
 

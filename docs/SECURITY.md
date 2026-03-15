@@ -36,7 +36,7 @@ Rules are evaluated in priority order (first match wins). Each rule specifies a 
 }
 ```
 
-**Important:** only JSON is supported for policy files. The policy file path is passed directly to `fs.readFileSync()` — see [Known Issue SEC-5](ISSUES.md) about path validation.
+**Important:** only JSON is supported for policy files. The policy file path is passed directly to `fs.readFileSync()` without path validation, and an invalid or unparseable file silently falls back to built-in defaults.
 
 ---
 
@@ -114,7 +114,7 @@ Telemetry (`logs/telemetry.jsonl`) and session files (`sessions/*.jsonl`) captur
 **These files may contain sensitive output** (file listings, usernames, partial secrets from command output). Ensure:
 
 - The `logs/` and `sessions/` directories have restricted permissions (`chmod 700`).
-- Files are rotated or deleted regularly — they grow without bound ([MED-4 in ISSUES.md](ISSUES.md)).
+- Files are rotated or deleted regularly — they grow without bound (no automatic rotation).
 - If running in a shared environment, set `--session-dir` and `--telemetry-file` to paths only you can read.
 
 To disable telemetry entirely: `--telemetry-file ""` or unset `AGENT_TELEMETRY_FILE`.
@@ -131,7 +131,7 @@ To disable telemetry entirely: `--telemetry-file ""` or unset `AGENT_TELEMETRY_F
 
 ## Known Security Issues
 
-See [docs/ISSUES.md](ISSUES.md) for the full list. The most critical open items affecting security:
+The following are known limitations to be aware of:
 
 | ID | Summary |
 |----|---------|
@@ -141,7 +141,7 @@ See [docs/ISSUES.md](ISSUES.md) for the full list. The most critical open items 
 | SEC-4 | Session path unvalidated — path traversal via `--session-id` |
 | SEC-5 | Safety policy path unvalidated + silent fallback on parse error |
 | SEC-6 | Invalid regex in policy crashes process at startup |
-| BUG-2 | `sudo` rule fires before `rm -rf /` rule — high-risk bypass |
+| BUG-1 | `sudo` rule fires before `rm -rf /` rule — high-risk bypass |
 
 ---
 

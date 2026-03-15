@@ -127,6 +127,8 @@ src/
     PlanView.tsx          Multi-step plan with status colors
     GoalSummary.tsx       End-of-goal result table
     StreamOutput.tsx      Live stdout/stderr display
+    OutputLog.tsx         Persistent scrollback log
+    ErrorBoundary.tsx     Render error safety net
   hooks/
     usePlanner.ts         Async hook wrapping planner.suggest()
     useCommandExec.ts     Spawns child process, streams output
@@ -141,6 +143,11 @@ src/
     logger.ts             File logger
     types.ts              Shared TypeScript interfaces
     env.ts                .env loader
+  __tests__/
+    planner.test.ts       JSON parsing, plan mode, repeated failure detection
+    planState.test.ts     PlanState, plan merging, history building
+    safety.test.ts        SafetyPolicy rule evaluation and priority ordering
+    scoreboard.test.ts    CommandScoreboard normalization and stats
 ```
 
 ## Safety Notes
